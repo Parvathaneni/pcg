@@ -1,0 +1,106 @@
+# =====================================================================
+# Harness Pipeline: Create IaCM Workspace from Template
+# ---------------------------------------------------------------------
+# What this pipeline does:
+#   - Collects 5 inputs at run time (repo, branch, folder, app id, BU)
+#   - Runs harness_workspace_setup.py to create the workspace
+#   - Passes the API key (from secret manager) and account id as env vars
+#
+# Stage type: Custom (no CI license needed; runs on a Harness Delegate)
+# Step type : ShellScript (runs the Python script)
+# =====================================================================
+
+pipeline:
+  name: Create IaCM Workspace
+  identifier: Create_IaCM_Workspace
+  projectIdentifier: your_project_id      # <-- edit to your project
+  orgIdentifier: your_org_id              # <-- edit to your org
+  tags: {}
+
+  # -------------------------------------------------------------------
+  # Pipeline variables = the values the apps team fills in at run time.
+  # "<+input>" means "ask for this value when the pipeline runs".
+  # -------------------------------------------------------------------
+  variables:
+    - name: repo_name
+      type: String
+      description: "Repository name (e.g. my-org/infra-repo)"
+      required: true
+      value: <+input>
+    - name: branch
+      type: String
+      description: "Branch to use (e.g. main)"
+      required: true
+      value: <+input>.default(main)
+    - name: folder_path
+      type: String
+      description: "Folder path in the repo with the Terraform files (e.g. envs/prod)"
+      required: true
+      value: <+input>
+    - name: app_id
+      type: String
+      description: "Application ID (e.g. APP-1234)"
+      required: true
+      value: <+input>
+    - name: bu
+      type: String
+      description: "Business Unit (e.g. Finance)"
+      required: true
+      value: <+input>
+
+  stages:
+    - stage:
+        name: Create Workspace
+        identifier: Create_Workspace
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Run Workspace Setup Script
+                  identifier: Run_Workspace_Setup_Script
+                  type: ShellScript
+                  timeout: 10m
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        # ---------------------------------------------
+                        # The script below:
+                        #   1. Installs the one Python dependency
+                        #   2. Exports the secret + account id as env vars
+                        #   3. Runs the Python script with the 5 inputs
+                        # ---------------------------------------------
+                        script: |-
+                          set -e
+
+                          echo "Installing dependencies..."
+                          pip install requests --quiet
+
+                          echo "Running workspace setup..."
+                          python3 harness_workspace_setup.py \
+                            "<+pipeline.variables.repo_name>" \
+                            "<+pipeline.variables.branch>" \
+                            "<+pipeline.variables.folder_path>" \
+                            "<+pipeline.variables.app_id>" \
+                            "<+pipeline.variables.bu>"
+                    environmentVariables:
+                      # The API key is pulled from the Harness secret manager.
+                      # Replace "harness_api_key" with your secret's identifier.
+                      - name: HARNESS_API_KEY
+                        type: Secret
+                        value: harness_api_key
+                      # The account id is provided by a built-in Harness expression.
+                      - name: HARNESS_ACCOUNT_ID
+                        type: String
+                        value: <+account.identifier>
+                    outputVariables: []
+                  failureStrategies:
+                    - onFailure:
+                        errors:
+                          - AllErrors
+                        action:
+                          type: Abort
+        tags: {}
